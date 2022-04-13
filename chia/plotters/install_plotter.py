@@ -1,9 +1,10 @@
 import os
+from pathlib import Path
 from chia.plotters.bladebit import install_bladebit
 from chia.plotters.madmax import install_madmax
 
 
-def install_plotter(plotter, root_path):
+def install_plotter(plotter: str, root_path: Path):
     if plotter == "chiapos":
         print("Chiapos already installed. No action taken.")
         return
