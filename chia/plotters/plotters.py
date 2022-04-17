@@ -314,6 +314,26 @@ def build_parser(subparsers, root_path, option_list, name, plotter_desc):
             )
 
 
+def build_install_parser(subparsers):
+    subparsers.add_argument(
+        "install_plotter", type=str, help="The plotters available for installing. Choose from madmax or bladebit."
+    )
+    subparsers.add_argument(
+        "-o",
+        "--override",
+        action="store_true",
+        help="Override existing install",
+        default=False,
+    )
+    subparsers.add_argument(
+        "-c",
+        "--commit",
+        type=str,
+        help="Git branch/tag/hash of plotter's git repository",
+        default=None,
+    )
+
+
 def call_plotters(root_path: Path, args):
     # Add `plotters` section in CHIA_ROOT.
     chia_root_path = root_path
@@ -331,15 +351,15 @@ def call_plotters(root_path: Path, args):
             os.mkdir(root_path)
         except Exception as e:
             print(f"Cannot create plotters root path {root_path} {type(e)} {e}.")
+
     plotters = argparse.ArgumentParser(description="Available options.")
     subparsers = plotters.add_subparsers(help="Available options", dest="plotter")
     build_parser(subparsers, root_path, chia_plotter, "chiapos", "Chiapos Plotter")
     build_parser(subparsers, root_path, madmax_plotter, "madmax", "Madmax Plotter")
     build_parser(subparsers, root_path, bladebit_plotter, "bladebit", "Bladebit Plotter")
     install_parser = subparsers.add_parser("install", description="Install custom plotters.")
-    install_parser.add_argument(
-        "install_plotter", type=str, help="The plotters available for installing. Choose from madmax or bladebit."
-    )
+    build_install_parser(install_parser)
+
     args = plotters.parse_args(args)
 
     if args.plotter == "chiapos":
@@ -349,7 +369,7 @@ def call_plotters(root_path: Path, args):
     if args.plotter == "bladebit":
         plot_bladebit(args, chia_root_path, root_path)
     if args.plotter == "install":
-        install_plotter(args.install_plotter, root_path)
+        install_plotter(args, root_path)
 
 
 def get_available_plotters(root_path) -> Dict[str, Any]:
