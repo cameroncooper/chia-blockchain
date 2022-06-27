@@ -14,7 +14,7 @@ from chia.simulator.simulator_protocol import FarmNewBlockProtocol
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.peer_info import PeerInfo
-from chia.util.bech32m import encode_puzzle_hash
+from chia.util.bech32m import decode_puzzle_hash, encode_puzzle_hash
 from chia.util.byte_types import hexstr_to_bytes
 from chia.util.ints import uint16, uint32, uint64
 from chia.wallet.did_wallet.did_info import DID_HRP
@@ -140,8 +140,8 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
         wallet_node_maker.wallet_state_manager, wallet_maker, name="NFT WALLET DID 1", did_id=did_id
     )
 
-    for _ in range(1, num_blocks):
-        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+    for _ in range(1, num_blocks * 3):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_maker))
 
     with open(csv_filename, "r") as f:
         csv_reader = csv.reader(f)
@@ -200,6 +200,20 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
     )
 
     for _ in range(1, num_blocks):
-        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_maker))
 
     await time_out_assert(15, len, chunk, nft_wallet_maker.my_nft_coins)
+
+    # send NFTs to recipients
+    targets = [decode_puzzle_hash(row[10]) for row in bulk_data]
+    nfts_to_send = nft_wallet_maker.my_nft_coins
+    send_tx = await nft_wallet_maker.bulk_transfer(nfts_to_send, targets[:chunk], fee=fee)
+
+    await time_out_assert(
+        15, tx_in_pool, True, full_node_api.full_node.mempool_manager, send_tx.spend_bundle.name()  # type: ignore
+    )
+
+    for _ in range(1, num_blocks):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+    await asyncio.sleep(5)
+    await time_out_assert(15, len, 0, nft_wallet_maker.my_nft_coins)

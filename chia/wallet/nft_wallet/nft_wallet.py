@@ -1258,3 +1258,49 @@ class NFTWallet:
         await self.wallet_state_manager.add_pending_transaction(set_tx)
 
         return set_tx
+
+    async def bulk_transfer(
+        self, nfts_to_send: List[NFTCoinInfo], targets: List[bytes32], fee: uint64 = uint64(0)
+    ) -> TransactionRecord:
+        if len(nfts_to_send) > len(targets):
+            raise ValueError("Number of NFTs is less than number of targets")
+        first = True
+        fee_to_pay = fee
+        spends = []
+        for i, nft_coin_info in enumerate(nfts_to_send):
+            txs = await self.generate_signed_transaction(
+                [nft_coin_info.coin.amount],
+                [targets[i]],
+                coins={nft_coin_info.coin},
+                fee=fee_to_pay,
+            )
+            if first:
+                first = False
+                fee_to_pay = uint64(0)
+                change_ph = [x for x in txs[1].additions if x.amount != fee][0].puzzle_hash
+            for tx in txs:
+                if tx.spend_bundle is not None:
+                    spends.append(tx.spend_bundle)
+
+        spend_bundle = SpendBundle.aggregate(spends)
+        main_wallet_id = self.standard_wallet.wallet_id
+        transfer_tx = TransactionRecord(
+            confirmed_at_height=uint32(0),
+            created_at_time=uint64(int(time.time())),
+            to_puzzle_hash=change_ph,
+            amount=uint64(len(nfts_to_send)),
+            fee_amount=uint64(fee),
+            confirmed=False,
+            sent=uint32(0),
+            spend_bundle=spend_bundle,
+            additions=spend_bundle.additions(),
+            removals=spend_bundle.removals(),
+            wallet_id=main_wallet_id,
+            sent_to=[],
+            trade_id=None,
+            type=uint32(TransactionType.OUTGOING_TX.value),
+            name=spend_bundle.name(),
+            memos=list(compute_memos(spend_bundle).items()),
+        )
+        await self.wallet_state_manager.add_pending_transaction(transfer_tx)
+        return transfer_tx
