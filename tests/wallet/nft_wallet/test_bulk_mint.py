@@ -14,16 +14,12 @@ from chia.simulator.simulator_protocol import FarmNewBlockProtocol
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.peer_info import PeerInfo
-from chia.types.spend_bundle import SpendBundle
 from chia.util.bech32m import encode_puzzle_hash
 from chia.util.byte_types import hexstr_to_bytes
 from chia.util.ints import uint16, uint32, uint64
 from chia.wallet.did_wallet.did_info import DID_HRP
 from chia.wallet.did_wallet.did_wallet import DIDWallet
 from chia.wallet.nft_wallet.nft_wallet import NFTWallet
-from chia.wallet.transaction_record import TransactionRecord
-
-# from chia.wallet.util.wallet_types import WalletType
 from tests.time_out_assert import time_out_assert, time_out_assert_not_none
 
 logging.getLogger("aiosqlite").setLevel(logging.INFO)  # Too much logging on debug level
@@ -144,11 +140,14 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
         wallet_node_maker.wallet_state_manager, wallet_maker, name="NFT WALLET DID 1", did_id=did_id
     )
 
+    for _ in range(1, num_blocks):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+
     with open(csv_filename, "r") as f:
         csv_reader = csv.reader(f)
         bulk_data = list(csv_reader)
 
-    chunk = 10
+    chunk = 15
 
     metadata_list_rpc = []
     for row in bulk_data[:chunk]:
@@ -182,8 +181,12 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
 
     fee = uint64(5)
     tx = await nft_wallet_maker.bulk_generate_nfts(metadata_list, did_id, royalty_did, royalty_basis_pts, fee)
-    assert tx
-    tx_queue: List[TransactionRecord] = await wallet_node_maker.wallet_state_manager.tx_store.get_not_sent()
-    tx_record = tx_queue[0]
-    assert isinstance(tx_record.spend_bundle, SpendBundle)
-    await time_out_assert(15, tx_in_pool, True, full_node_api.full_node.mempool_manager, tx_record.spend_bundle.name())
+
+    await time_out_assert(
+        15, tx_in_pool, True, full_node_api.full_node.mempool_manager, tx.spend_bundle.name()  # type: ignore
+    )
+
+    for _ in range(1, num_blocks):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+
+    await time_out_assert(15, len, chunk, nft_wallet_maker.my_nft_coins)

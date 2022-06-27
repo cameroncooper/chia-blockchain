@@ -345,7 +345,6 @@ class NFTWallet:
         percentage: uint16 = uint16(0),
         did_id: Optional[bytes] = None,
         fee: uint64 = uint64(0),
-        push_tx: bool = True,
     ) -> Optional[SpendBundle]:
         """
         This must be called under the wallet state manager lock
@@ -441,9 +440,8 @@ class NFTWallet:
             additional_bundles=bundles_to_agg,
             memos=[[target_puzzle_hash]],
         )
-        if push_tx:
-            for tx in txs:
-                await self.wallet_state_manager.add_pending_transaction(tx)
+        for tx in txs:
+            await self.wallet_state_manager.add_pending_transaction(tx)
         return SpendBundle.aggregate([x.spend_bundle for x in txs if x.spend_bundle is not None])
 
     async def sign(self, spend_bundle: SpendBundle, puzzle_hashes: List[bytes32] = None) -> SpendBundle:
@@ -1060,6 +1058,14 @@ class NFTWallet:
         if self.did_id is not None and did_id is None:
             # For a DID enabled NFT wallet it cannot mint NFT0. Mint NFT1 instead.
             did_id = self.did_id
+        for _, wallet in self.wallet_state_manager.wallets.items():
+            if wallet.type() == WalletType.DECENTRALIZED_ID:
+                if bytes32.fromhex(wallet.get_my_DID()) == did_id:
+                    did_wallet = wallet
+                    did_inner_hash = wallet.did_info.current_inner.get_tree_hash()
+                    break
+        else:
+            raise ValueError(f"Missing DID Wallet for did_id: {did_id}")
         amount = uint64(1)
         main_wallet_id = self.standard_wallet.wallet_id
         spendable_coins = list(await self.wallet_state_manager.get_spendable_coins_for_wallet(main_wallet_id))
@@ -1068,6 +1074,7 @@ class NFTWallet:
         first = True
         fee_to_pay = fee
         launch_txs = []
+        nfts = []
         for i, metadata in enumerate(metadata_list):
             origin = spendable_coins[i]
             genesis_launcher_puz = nft_puzzles.LAUNCHER_PUZZLE
@@ -1135,11 +1142,11 @@ class NFTWallet:
                 return None
 
             bundles_to_agg = [tx_record.spend_bundle, launcher_sb]
-            did_inner_hash = b""
-            if did_id is not None:
-                if did_id != b"":
-                    did_inner_hash, did_bundle = await self.get_did_approval_info(launcher_coin.name())
-                    bundles_to_agg.append(did_bundle)
+            # did_inner_hash = b""
+            # if did_id is not None:
+            #     if did_id != b"":
+            #         did_inner_hash, did_bundle = await self.get_did_approval_info(launcher_coin.name())
+            # bundles_to_agg.append(did_bundle)
             nft_coin = NFTCoinInfo(
                 nft_id=launcher_coin.name(),
                 coin=eve_coin,
@@ -1152,16 +1159,22 @@ class NFTWallet:
                 [eve_coin.amount],
                 [target_puzzle_hash],
                 nft_coin=nft_coin,
-                fee=fee,
+                fee=fee_to_pay,
                 new_owner=did_id,
                 new_did_inner_hash=did_inner_hash,
                 additional_bundles=bundles_to_agg,
                 memos=[[target_puzzle_hash]],
             )
+            nfts.append(launcher_coin.name())
             launch_txs.extend(txs)
 
         # aggregate txs into a single tx
-        launch_sb = SpendBundle.aggregate([x.spend_bundle for x in launch_txs if x.spend_bundle is not None])
+        bundles = [x.spend_bundle for x in launch_txs if x.spend_bundle is not None]
+        did_bundle = await did_wallet.create_message_spend(
+            puzzle_announcements=set(nfts), new_innerpuzhash=did_inner_hash
+        )
+        bundles.append(did_bundle)
+        launch_sb = SpendBundle.aggregate(bundles)
         launch_tx = TransactionRecord(
             confirmed_at_height=uint32(0),
             created_at_time=uint64(int(time.time())),
