@@ -2,7 +2,7 @@ import json
 import logging
 import time
 from secrets import token_bytes
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, TypeVar
+from typing import Any, Dict, List, Optional, Set, Tuple, Type, TypeVar, Union
 
 from blspy import AugSchemeMPL, G1Element, G2Element
 
@@ -1050,8 +1050,8 @@ class NFTWallet:
         self,
         metadata_list: List[Program],
         did_id: bytes32,
-        royalty_did_id: str = None,
-        royalty_percent: Optional[uint16] = None,
+        royalty_did_id: Union[str, bytes32] = None,
+        royalty_percentage: Optional[uint16] = None,
         fee: uint64 = uint64(0),
     ) -> Optional[TransactionRecord]:
         self.log.debug("Generating bulk NFTs")
@@ -1087,11 +1087,17 @@ class NFTWallet:
                 # eve coin DID can be set to whatever so we keep it empty
                 # WARNING: wallets should always ignore DID value for eve coins as they can be set
                 #          to any DID without approval
-                assert isinstance(royalty_did_id, str)
-                royalty_puzzle_hash = decode_puzzle_hash(royalty_did_id)
-                assert isinstance(royalty_percent, uint16)
+                if isinstance(royalty_did_id, str):
+                    royalty_puzzle_hash = decode_puzzle_hash(royalty_did_id)
+                else:
+                    royalty_puzzle_hash = royalty_did_id  # type: ignore
+                assert isinstance(royalty_percentage, uint16)
                 inner_puzzle = create_ownership_layer_puzzle(
-                    launcher_coin.name(), b"", p2_inner_puzzle, royalty_percent, royalty_puzzle_hash=royalty_puzzle_hash
+                    launcher_coin.name(),
+                    b"",
+                    p2_inner_puzzle,
+                    royalty_percentage,
+                    royalty_puzzle_hash=royalty_puzzle_hash,
                 )
                 self.log.debug("Got back ownership inner puzzle: %s", disassemble(inner_puzzle))
             else:

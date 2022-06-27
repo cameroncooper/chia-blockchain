@@ -624,17 +624,15 @@ class WalletRpcClient(RpcClient):
         self,
         wallet_id,
         metadata,
-        royalty_addresses,
-        royalty_percentages,
-        target_addresses,
+        royalty_address,
+        royalty_percentage,
         did_id,
     ):
         request: Dict[str:Any] = {
             "wallet_id": wallet_id,
             "metadata": metadata,
-            "royalty_addresses": royalty_addresses,
-            "royalty_percentages": royalty_percentages,
-            "target_addresses": target_addresses,
+            "royalty_address": royalty_address,
+            "royalty_percentage": royalty_percentage,
             "did_id": did_id,
         }
         response = await self.fetch("nft_bulk_mint_nft", request)

@@ -9,6 +9,7 @@ from faker import Faker
 
 from chia.consensus.block_rewards import calculate_base_farmer_reward, calculate_pool_reward
 from chia.full_node.mempool_manager import MempoolManager
+from chia.rpc.wallet_rpc_api import WalletRpcApi
 from chia.simulator.full_node_simulator import FullNodeSimulator
 from chia.simulator.simulator_protocol import FarmNewBlockProtocol
 from chia.types.blockchain_format.program import Program
@@ -147,7 +148,7 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
         csv_reader = csv.reader(f)
         bulk_data = list(csv_reader)
 
-    chunk = 15
+    chunk = 5
 
     metadata_list_rpc = []
     for row in bulk_data[:chunk]:
@@ -194,7 +195,7 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
     # set DID for the bulk NFTs
     nfts_to_set = nft_wallet_maker.my_nft_coins
     set_tx = await nft_wallet_maker.bulk_set_nft_did(nfts_to_set, did_id, fee=fee)
-
+    await asyncio.sleep(5)
     await time_out_assert(
         15, tx_in_pool, True, full_node_api.full_node.mempool_manager, set_tx.spend_bundle.name()  # type: ignore
     )
@@ -217,3 +218,133 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
         await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
     await asyncio.sleep(5)
     await time_out_assert(15, len, 0, nft_wallet_maker.my_nft_coins)
+
+
+@pytest.mark.parametrize(
+    "trusted",
+    [True],
+)
+@pytest.mark.asyncio
+async def test_nft_rpc_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any) -> None:
+    csv_filename = await csv_file
+    num_blocks = 3
+    full_nodes, wallets = two_wallet_nodes
+    full_node_api = full_nodes[0]
+    full_node_server = full_node_api.server
+    wallet_node_0, server_0 = wallets[0]
+    wallet_node_1, server_1 = wallets[1]
+    wallet_0 = wallet_node_0.wallet_state_manager.main_wallet
+    wallet_1 = wallet_node_1.wallet_state_manager.main_wallet
+
+    ph = await wallet_0.get_new_puzzlehash()
+    _ = await wallet_1.get_new_puzzlehash()
+
+    if trusted:
+        wallet_node_0.config["trusted_peers"] = {
+            full_node_api.full_node.server.node_id.hex(): full_node_api.full_node.server.node_id.hex()
+        }
+        wallet_node_1.config["trusted_peers"] = {
+            full_node_api.full_node.server.node_id.hex(): full_node_api.full_node.server.node_id.hex()
+        }
+    else:
+        wallet_node_0.config["trusted_peers"] = {}
+        wallet_node_1.config["trusted_peers"] = {}
+
+    for i in range(1, num_blocks):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph))
+
+    await server_0.start_client(PeerInfo("localhost", uint16(full_node_server._port)), None)
+    await server_1.start_client(PeerInfo("localhost", uint16(full_node_server._port)), None)
+
+    funds = sum(
+        [calculate_pool_reward(uint32(i)) + calculate_base_farmer_reward(uint32(i)) for i in range(1, num_blocks - 1)]
+    )
+
+    await time_out_assert(10, wallet_0.get_unconfirmed_balance, funds)
+    await time_out_assert(10, wallet_0.get_confirmed_balance, funds)
+
+    api_0 = WalletRpcApi(wallet_node_0)
+    await time_out_assert(10, wallet_node_0.wallet_state_manager.synced, True)
+    await time_out_assert(10, wallet_node_1.wallet_state_manager.synced, True)
+
+    did_wallet: DIDWallet = await DIDWallet.create_new_did_wallet(
+        wallet_node_0.wallet_state_manager, wallet_0, uint64(1)
+    )
+    spend_bundle_list = await wallet_node_0.wallet_state_manager.tx_store.get_unconfirmed_for_wallet(wallet_0.id())
+    spend_bundle = spend_bundle_list[0].spend_bundle
+    await time_out_assert_not_none(5, full_node_api.full_node.mempool_manager.get_spendbundle, spend_bundle.name())
+
+    for _ in range(1, num_blocks * 5):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph))
+
+    await time_out_assert(15, wallet_0.get_pending_change_balance, 0)
+    hex_did_id = did_wallet.get_my_DID()
+    hmr_did_id = encode_puzzle_hash(bytes32.from_hexstr(hex_did_id), DID_HRP)
+    # did_id = bytes32.fromhex(hex_did_id)
+    royalty_address = hmr_did_id
+    royalty_percentage = uint16(200)
+
+    nft_wallet_0 = await api_0.create_new_wallet(dict(wallet_type="nft_wallet", name="NFT WALLET 1", did_id=hmr_did_id))
+    assert isinstance(nft_wallet_0, dict)
+    assert nft_wallet_0.get("success")
+    nft_wallet_0_id = nft_wallet_0["wallet_id"]
+
+    with open(csv_filename, "r") as f:
+        csv_reader = csv.reader(f)
+        bulk_data = list(csv_reader)
+
+    chunk = 15
+
+    metadata_list_rpc = []
+    for row in bulk_data[:chunk]:
+        metadata = {
+            "hash": row[0],
+            "uris": [row[1]],
+            "meta_hash": row[2],
+            "meta_urls": [row[3]],
+            "license_hash": row[4],
+            "license_urls": [row[5]],
+            "series_number": row[6],
+            "series_total": row[7],
+        }
+        metadata_list_rpc.append(metadata)
+
+    metadata_list = []
+    for meta in metadata_list_rpc:
+        metadata = [  # type: ignore
+            ("u", meta["uris"]),
+            ("h", hexstr_to_bytes(meta["hash"])),  # type: ignore
+            ("mu", meta.get("meta_uris", [])),
+            ("lu", meta.get("license_uris", [])),
+            ("sn", uint64(meta.get("series_number", 1))),  # type: ignore
+            ("st", uint64(meta.get("series_total", 1))),  # type: ignore
+        ]
+        if "meta_hash" in meta and len(meta["meta_hash"]) > 0:
+            metadata.append(("mh", hexstr_to_bytes(meta["meta_hash"])))  # type: ignore
+        if "license_hash" in meta and len(meta["license_hash"]) > 0:
+            metadata.append(("lh", hexstr_to_bytes(meta["license_hash"])))  # type: ignore
+        metadata_list.append(Program.to(metadata))
+
+    resp = await api_0.nft_bulk_mint_nft(
+        {
+            "wallet_id": nft_wallet_0_id,
+            "metadata_list": metadata_list_rpc,
+            "royalty_address": royalty_address,
+            "royalty_percentage": royalty_percentage,
+            "did_id": hmr_did_id,
+        }
+    )
+    assert resp["success"]
+
+    # Confirm the transaction is in mempool, farm block, and confirm nfts are created in wallet
+
+    # Create the RPC endpoints needed to continue the test to set the did on the created NFTs:
+    # api_0.bulk_set_nft_did({
+    #     nfts_to_set,
+    #     did_id,
+    #     fee=fee})
+
+    # Create RPC endpoint for bulk transfer:
+    # api_o.bulk_transfer({
+    #     nfts_to_send,
+    #     targets})
