@@ -190,3 +190,16 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
         await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
 
     await time_out_assert(15, len, chunk, nft_wallet_maker.my_nft_coins)
+
+    # set DID for the bulk NFTs
+    nfts_to_set = nft_wallet_maker.my_nft_coins
+    set_tx = await nft_wallet_maker.bulk_set_nft_did(nfts_to_set, did_id, fee=fee)
+
+    await time_out_assert(
+        15, tx_in_pool, True, full_node_api.full_node.mempool_manager, set_tx.spend_bundle.name()  # type: ignore
+    )
+
+    for _ in range(1, num_blocks):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+
+    await time_out_assert(15, len, chunk, nft_wallet_maker.my_nft_coins)

@@ -1142,11 +1142,6 @@ class NFTWallet:
                 return None
 
             bundles_to_agg = [tx_record.spend_bundle, launcher_sb]
-            # did_inner_hash = b""
-            # if did_id is not None:
-            #     if did_id != b"":
-            #         did_inner_hash, did_bundle = await self.get_did_approval_info(launcher_coin.name())
-            # bundles_to_agg.append(did_bundle)
             nft_coin = NFTCoinInfo(
                 nft_id=launcher_coin.name(),
                 coin=eve_coin,
@@ -1197,3 +1192,69 @@ class NFTWallet:
         await self.wallet_state_manager.add_pending_transaction(launch_tx)
 
         return launch_tx
+
+    async def bulk_set_nft_did(
+        self, nft_coins: List[NFTCoinInfo], did_id: Optional[bytes32], fee: uint64 = uint64(0)
+    ) -> TransactionRecord:
+        nft_ids = []
+        nft_sbs = []
+        for _, wallet in self.wallet_state_manager.wallets.items():
+            if wallet.type() == WalletType.DECENTRALIZED_ID:
+                if bytes32.fromhex(wallet.get_my_DID()) == did_id:
+                    did_wallet = wallet
+                    did_inner_hash = wallet.did_info.current_inner.get_tree_hash()
+                    break
+        else:
+            raise ValueError(f"Missing DID Wallet for did_id: {did_id}")
+        first = True
+        fee_to_pay = fee
+        for nft_coin_info in nft_coins:
+            unft = UncurriedNFT.uncurry(nft_coin_info.full_puzzle)
+            nft_id = unft.singleton_launcher_id
+            # did_inner_hash, did_bundle = await self.get_did_approval_info(nft_id, did_id)
+            puzzle_hashes_to_sign = [unft.p2_puzzle.get_tree_hash()]
+            nft_ids.append(nft_id)
+            nft_tx_record = await self.generate_signed_transaction(
+                [nft_coin_info.coin.amount],
+                puzzle_hashes_to_sign,
+                fee_to_pay,
+                {nft_coin_info.coin},
+                new_owner=did_id if did_id else b"",
+                new_did_inner_hash=did_inner_hash if did_inner_hash else b"",
+                # additional_bundles=additional_bundles,
+            )
+            if first:
+                first = False
+                fee_to_pay = uint64(0)
+            for tx in nft_tx_record:
+                if tx.spend_bundle is not None:
+                    nft_sbs.append(tx.spend_bundle)
+
+        did_bundle = await did_wallet.create_message_spend(
+            puzzle_announcements=set(nft_ids), new_innerpuzhash=did_inner_hash
+        )
+
+        nft_sbs.append(did_bundle)
+        spend_bundle = SpendBundle.aggregate(nft_sbs)
+        main_wallet_id = self.standard_wallet.wallet_id
+        set_tx = TransactionRecord(
+            confirmed_at_height=uint32(0),
+            created_at_time=uint64(int(time.time())),
+            to_puzzle_hash=puzzle_hashes_to_sign[0],
+            amount=uint64(len(nft_coins)),
+            fee_amount=uint64(fee),
+            confirmed=False,
+            sent=uint32(0),
+            spend_bundle=spend_bundle,
+            additions=spend_bundle.additions(),
+            removals=spend_bundle.removals(),
+            wallet_id=main_wallet_id,
+            sent_to=[],
+            trade_id=None,
+            type=uint32(TransactionType.OUTGOING_TX.value),
+            name=spend_bundle.name(),
+            memos=list(compute_memos(spend_bundle).items()),
+        )
+        await self.wallet_state_manager.add_pending_transaction(set_tx)
+
+        return set_tx
