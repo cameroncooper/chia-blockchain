@@ -620,6 +620,36 @@ class WalletRpcClient(RpcClient):
         response = await self.fetch("nft_mint_nft", request)
         return response
 
+    async def get_nft_info(self, coin_id: str, latest: bool = True):
+        request: Dict[str, Any] = {"coin_id": coin_id, "latest": latest}
+        response = await self.fetch("nft_get_info", request)
+        return response
+
+    async def transfer_nft(self, wallet_id, nft_coin_id, target_address, fee):
+        request: Dict[str, Any] = {
+            "wallet_id": wallet_id,
+            "nft_coin_id": nft_coin_id,
+            "target_address": target_address,
+            "fee": fee,
+        }
+        response = await self.fetch("nft_transfer_nft", request)
+        return response
+
+    async def list_nfts(self, wallet_id):
+        request: Dict[str, Any] = {"wallet_id": wallet_id}
+        response = await self.fetch("nft_get_nfts", request)
+        return response
+
+    async def set_nft_did(self, wallet_id, did_id, nft_coin_id, fee):
+        request: Dict[str, Any] = {"wallet_id": wallet_id, "did_id": did_id, "nft_coin_id": nft_coin_id, "fee": fee}
+        response = await self.fetch("nft_set_nft_did", request)
+        return response
+
+    async def get_nft_wallet_did(self, wallet_id):
+        request: Dict[str, Any] = {"wallet_id": wallet_id}
+        response = await self.fetch("nft_get_wallet_did", request)
+        return response
+
     async def bulk_mint_nft(
         self,
         wallet_id,
@@ -649,32 +679,17 @@ class WalletRpcClient(RpcClient):
         response = await self.fetch("nft_add_uri", request)
         return response
 
-    async def get_nft_info(self, coin_id: str, latest: bool = True):
-        request: Dict[str, Any] = {"coin_id": coin_id, "latest": latest}
-        response = await self.fetch("nft_get_info", request)
-        return response
-
-    async def transfer_nft(self, wallet_id, nft_coin_id, target_address, fee):
-        request: Dict[str, Any] = {
+    async def bulk_set_nft_did(self, wallet_id, did_id, nft_coin_id_list, fee):
+        request: Dict[str:Any] = {
             "wallet_id": wallet_id,
-            "nft_coin_id": nft_coin_id,
-            "target_address": target_address,
+            "did_id": did_id,
+            "nft_coin_id_list": nft_coin_id_list,
             "fee": fee,
         }
-        response = await self.fetch("nft_transfer_nft", request)
+        response = await self.fetch("nft_bulk_set_did", request)
         return response
 
-    async def list_nfts(self, wallet_id):
-        request: Dict[str, Any] = {"wallet_id": wallet_id}
-        response = await self.fetch("nft_get_nfts", request)
-        return response
-
-    async def set_nft_did(self, wallet_id, did_id, nft_coin_id, fee):
-        request: Dict[str, Any] = {"wallet_id": wallet_id, "did_id": did_id, "nft_coin_id": nft_coin_id, "fee": fee}
-        response = await self.fetch("nft_set_nft_did", request)
-        return response
-
-    async def get_nft_wallet_did(self, wallet_id):
-        request: Dict[str, Any] = {"wallet_id": wallet_id}
-        response = await self.fetch("nft_get_wallet_did", request)
+    async def bulk_nft_transfer(self, wallet_id, transfer_list, fee):
+        request: Dict[str:Any] = {"wallet_id": wallet_id, "transfer_list": transfer_list, "fee": fee}
+        response = await self.fetch("nft_bulk_transfer", request)
         return response
