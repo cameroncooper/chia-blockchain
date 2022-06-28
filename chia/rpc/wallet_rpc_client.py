@@ -653,18 +653,21 @@ class WalletRpcClient(RpcClient):
     async def bulk_mint_nft(
         self,
         wallet_id,
-        metadata,
+        metadata_list,
         royalty_address,
         royalty_percentage,
         did_id,
+        fee,
     ):
         request: Dict[str:Any] = {
             "wallet_id": wallet_id,
-            "metadata": metadata,
+            "metadata_list": metadata_list,
             "royalty_address": royalty_address,
             "royalty_percentage": royalty_percentage,
             "did_id": did_id,
+            "fee": fee,
         }
+        breakpoint()
         response = await self.fetch("nft_bulk_mint_nft", request)
         return response
 

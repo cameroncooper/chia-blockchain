@@ -1454,7 +1454,7 @@ class WalletRpcApi:
             metadata_list, did_id, royalty_puzhash, royalty_percentage=royalty_percentage, fee=fee
         )
         assert isinstance(tx, TransactionRecord)
-        return {"wallet_id": wallet_id, "success": True, "spend_bundle": tx.spend_bundle}
+        return {"wallet_id": wallet_id, "success": True, "spend_bundle": tx.spend_bundle, "tx_id": tx.name}
 
     async def nft_get_nfts(self, request) -> Dict:
         wallet_id = uint32(request["wallet_id"])
