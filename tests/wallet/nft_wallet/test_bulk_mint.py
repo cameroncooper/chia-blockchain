@@ -138,7 +138,7 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
         wallet_node_maker.wallet_state_manager, wallet_maker, uint64(1)
     )
     spend_bundle_list = await wallet_node_maker.wallet_state_manager.tx_store.get_unconfirmed_for_wallet(
-        wallet_maker.id()
+        did_wallet_maker.id()
     )
 
     spend_bundle = spend_bundle_list[0].spend_bundle
@@ -291,7 +291,7 @@ async def test_nft_rpc_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: 
     did_wallet: DIDWallet = await DIDWallet.create_new_did_wallet(
         wallet_node_0.wallet_state_manager, wallet_0, uint64(1)
     )
-    spend_bundle_list = await wallet_node_0.wallet_state_manager.tx_store.get_unconfirmed_for_wallet(wallet_0.id())
+    spend_bundle_list = await wallet_node_0.wallet_state_manager.tx_store.get_unconfirmed_for_wallet(did_wallet.id())
     spend_bundle = spend_bundle_list[0].spend_bundle
     await time_out_assert_not_none(5, full_node_api.full_node.mempool_manager.get_spendbundle, spend_bundle.name())
 
@@ -378,7 +378,7 @@ async def test_nft_rpc_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: 
     did_wallet_1: DIDWallet = await DIDWallet.create_new_did_wallet(
         wallet_node_1.wallet_state_manager, wallet_1, uint64(1)
     )
-    spend_bundle_list = await wallet_node_1.wallet_state_manager.tx_store.get_unconfirmed_for_wallet(wallet_1.id())
+    spend_bundle_list = await wallet_node_1.wallet_state_manager.tx_store.get_unconfirmed_for_wallet(did_wallet_1.id())
     spend_bundle = spend_bundle_list[0].spend_bundle
     await time_out_assert_not_none(5, full_node_api.full_node.mempool_manager.get_spendbundle, spend_bundle.name())
 
