@@ -85,6 +85,7 @@ class NFTManager:
                 "series_total": row[7],
             }
             metadata_list.append(metadata)
+
         resp = await self.wallet_client.bulk_mint_nft(
             wallet_id=self.nft_wallet_id,
             metadata_list=metadata_list,
@@ -115,11 +116,10 @@ async def main(csv_filename, chunk, royalty_address, royalty_percentage, fee) ->
         bulk_data = list(csv_reader)
     manager = NFTManager()
     await manager.connect()
-    breakpoint()
 
     data = bulk_data[:chunk]
     mint_tx = await manager.mint_nfts(data, royalty_address, royalty_percentage, fee)
-    breakpoint()
+
     # start_row = 0
     # for data in bulk_data[start_row:start_row+chunk]:
     #     mint_sb = await manager.mint_nfts(data, royalty_address, royalty_percentage)
@@ -146,4 +146,4 @@ if __name__ == "__main__":
     wallet_fingerprint = 1455603606
     fee = 10
 
-    asyncio.run(main(csv_filename, chunk, royalty_address, royalty_percentage, did_wallet_id, nft_wallet_id, fee))
+    asyncio.run(main(csv_filename, chunk, royalty_address, royalty_percentage, fee))
