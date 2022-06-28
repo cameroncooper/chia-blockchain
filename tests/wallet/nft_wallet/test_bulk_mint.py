@@ -1,8 +1,9 @@
 import asyncio
 import csv
 import logging
+import time
 from secrets import token_bytes
-from typing import Any, List
+from typing import Any, Awaitable, Callable, Dict, List
 
 import pytest
 from faker import Faker
@@ -24,6 +25,25 @@ from chia.wallet.nft_wallet.nft_wallet import NFTWallet
 from tests.time_out_assert import time_out_assert, time_out_assert_not_none
 
 logging.getLogger("aiosqlite").setLevel(logging.INFO)  # Too much logging on debug level
+
+
+async def wait_rpc_state_condition(
+    timeout: int,
+    coroutine: Callable[[Dict[str, Any]], Awaitable[Dict]],
+    params: List[Dict],
+    condition_func: Callable[[Dict[str, Any]], bool],
+) -> Dict:
+    start = time.monotonic()
+    resp = None
+    while time.monotonic() - start < timeout:
+        resp = await coroutine(*params)
+        assert isinstance(resp, dict)
+        if condition_func(resp):
+            return resp
+        await asyncio.sleep(0.5)
+    # timed out
+    assert time.monotonic() - start < timeout, resp
+    return {}
 
 
 async def tx_in_pool(mempool: MempoolManager, tx_id: bytes32) -> bool:
@@ -208,7 +228,7 @@ async def test_nft_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: Any)
     # send NFTs to recipients
     targets = [decode_puzzle_hash(row[10]) for row in bulk_data]
     nfts_to_send = nft_wallet_maker.my_nft_coins
-    send_tx = await nft_wallet_maker.bulk_transfer(nfts_to_send, targets[:chunk], fee=fee)
+    send_tx = await nft_wallet_maker.bulk_transfer(list(zip(nfts_to_send, targets[:chunk])), fee=fee)
 
     await time_out_assert(
         15, tx_in_pool, True, full_node_api.full_node.mempool_manager, send_tx.spend_bundle.name()  # type: ignore
@@ -237,7 +257,7 @@ async def test_nft_rpc_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: 
     wallet_1 = wallet_node_1.wallet_state_manager.main_wallet
 
     ph = await wallet_0.get_new_puzzlehash()
-    _ = await wallet_1.get_new_puzzlehash()
+    ph1 = await wallet_1.get_new_puzzlehash()
 
     if trusted:
         wallet_node_0.config["trusted_peers"] = {
@@ -264,6 +284,7 @@ async def test_nft_rpc_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: 
     await time_out_assert(10, wallet_0.get_confirmed_balance, funds)
 
     api_0 = WalletRpcApi(wallet_node_0)
+    api_1 = WalletRpcApi(wallet_node_1)
     await time_out_assert(10, wallet_node_0.wallet_state_manager.synced, True)
     await time_out_assert(10, wallet_node_1.wallet_state_manager.synced, True)
 
@@ -332,19 +353,79 @@ async def test_nft_rpc_bulk_mint(two_wallet_nodes: Any, trusted: Any, csv_file: 
             "royalty_address": royalty_address,
             "royalty_percentage": royalty_percentage,
             "did_id": hmr_did_id,
+            "fee": 100,
         }
     )
     assert resp["success"]
-
     # Confirm the transaction is in mempool, farm block, and confirm nfts are created in wallet
+    for _ in range(1, num_blocks * 5):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph1))
+    ntf_num = len(metadata_list_rpc)
+    res = await wait_rpc_state_condition(
+        15,
+        api_0.nft_get_nfts,
+        [dict(wallet_id=nft_wallet_0_id)],
+        lambda x: x["nft_list"] and len(x["nft_list"]) == ntf_num,
+    )
+    transfer_list = []
+    addr = encode_puzzle_hash(ph1, "txch")
+    for nft in res["nft_list"]:
+        nft_info = nft.to_json_dict()
+        assert nft_info["owner_did"][2:] == hex_did_id
+        transfer_list.append([nft_info["nft_coin_id"], addr])
 
-    # Create the RPC endpoints needed to continue the test to set the did on the created NFTs:
-    # api_0.bulk_set_nft_did({
-    #     nfts_to_set,
-    #     did_id,
-    #     fee=fee})
+    # Create another DID
+    did_wallet_1: DIDWallet = await DIDWallet.create_new_did_wallet(
+        wallet_node_1.wallet_state_manager, wallet_1, uint64(1)
+    )
+    spend_bundle_list = await wallet_node_1.wallet_state_manager.tx_store.get_unconfirmed_for_wallet(wallet_1.id())
+    spend_bundle = spend_bundle_list[0].spend_bundle
+    await time_out_assert_not_none(5, full_node_api.full_node.mempool_manager.get_spendbundle, spend_bundle.name())
 
-    # Create RPC endpoint for bulk transfer:
-    # api_o.bulk_transfer({
-    #     nfts_to_send,
-    #     targets})
+    # Test bulk transfer
+    resp = await api_0.nft_bulk_transfer(dict(wallet_id=nft_wallet_0_id, transfer_list=transfer_list, fee=100))
+    assert resp["success"]
+
+    for _ in range(1, num_blocks * 5):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph))
+
+    await time_out_assert(15, wallet_1.get_pending_change_balance, 0)
+    hex_did_id_1 = did_wallet_1.get_my_DID()
+    hmr_did_id_1 = encode_puzzle_hash(bytes32.from_hexstr(hex_did_id_1), DID_HRP)
+
+    res = await wait_rpc_state_condition(15, api_1.nft_get_by_did, [dict()], lambda x: x["wallet_id"])
+    nft_wallet_1_id = res["wallet_id"]
+    res = await wait_rpc_state_condition(
+        15,
+        api_1.nft_get_nfts,
+        [dict(wallet_id=nft_wallet_1_id)],
+        lambda x: x["nft_list"] and len(x["nft_list"]) == ntf_num,
+    )
+    nft_list = []
+    for nft in res["nft_list"]:
+        nft_info = nft.to_json_dict()
+        assert not nft_info["owner_did"]
+        nft_list.append(nft_info["nft_coin_id"])
+
+    # Test bulk set DID
+    resp = await api_1.nft_bulk_set_did(
+        dict(wallet_id=nft_wallet_1_id, nft_coin_id_list=nft_list, did_id=hmr_did_id_1, fee=100)
+    )
+    assert resp["success"]
+
+    for _ in range(1, num_blocks * 5):
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph1))
+
+    res = await wait_rpc_state_condition(
+        15, api_1.nft_get_by_did, [dict(did_id=hmr_did_id_1)], lambda x: x["wallet_id"]
+    )
+    nft_wallet_2_id = res["wallet_id"]
+    res = await wait_rpc_state_condition(
+        15,
+        api_1.nft_get_nfts,
+        [dict(wallet_id=nft_wallet_2_id)],
+        lambda x: x["nft_list"] and len(x["nft_list"]) == ntf_num,
+    )
+    for nft in res["nft_list"]:
+        nft_info = nft.to_json_dict()
+        assert nft_info["owner_did"][2:] == hex_did_id_1

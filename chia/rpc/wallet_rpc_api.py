@@ -144,6 +144,8 @@ class WalletRpcApi:
             "/nft_transfer_nft": self.nft_transfer_nft,
             "/nft_add_uri": self.nft_add_uri,
             "/nft_bulk_mint_nft": self.nft_bulk_mint_nft,
+            "/nft_bulk_set_did": self.nft_bulk_set_did,
+            "/nft_bulk_transfer": self.nft_bulk_transfer,
             # RL wallet
             "/rl_set_user_info": self.rl_set_user_info,
             "/send_clawback_transaction:": self.send_clawback_transaction,
@@ -1459,7 +1461,7 @@ class WalletRpcApi:
             nft_info_list.append(nft_puzzles.get_nft_info_from_puzzle(nft))
         return {"wallet_id": wallet_id, "success": True, "nft_list": nft_info_list}
 
-    async def nft_set_nft_did(self, request):
+    async def nft_set_nft_did(self, request) -> Dict:
         try:
             assert self.service.wallet_state_manager is not None
             wallet_id = uint32(request["wallet_id"])
@@ -1474,6 +1476,31 @@ class WalletRpcApi:
         except Exception as e:
             log.exception(f"Failed to set DID on NFT: {e}")
             return {"success": False, "error": f"Failed to set DID on NFT: {e}"}
+
+    async def nft_bulk_set_did(self, request) -> Dict:
+        try:
+            assert self.service.wallet_state_manager is not None
+            wallet_id = uint32(request["wallet_id"])
+            nft_wallet: NFTWallet = self.service.wallet_state_manager.wallets[wallet_id]
+            did_id: Optional[bytes32] = None
+            if "did_id" in request:
+                did_id = decode_puzzle_hash(request["did_id"])
+            nft_list = []
+            for nft_coin_id in request["nft_coin_id_list"]:
+                try:
+                    nft_coin_info = nft_wallet.get_nft_coin_by_id(bytes32.from_hexstr(nft_coin_id))
+                    nft_list.append(nft_coin_info)
+                except ValueError:
+                    log.warning("Cannot find NFT coin %s, skipping ...", nft_coin_id)
+                    continue
+            if len(nft_list) == 0:
+                return {"success": False, "error": "No valid NFT can be set DID."}
+            fee = uint64(request.get("fee", 0))
+            tx = await nft_wallet.bulk_set_nft_did(nft_list, did_id, fee=fee)
+            return {"wallet_id": wallet_id, "success": True, "spend_bundle": tx.spend_bundle}
+        except Exception as e:
+            log.exception(f"Failed to set DID for NFTs: {e}")
+            return {"success": False, "error": f"Failed to set DID for NFTs: {e}"}
 
     async def nft_get_by_did(self, request) -> Dict:
         did_id: Optional[bytes32] = None
@@ -1525,7 +1552,7 @@ class WalletRpcApi:
                         )
         return {"success": True, "nft_wallets": did_nft_wallets}
 
-    async def nft_transfer_nft(self, request):
+    async def nft_transfer_nft(self, request) -> Dict:
         assert self.service.wallet_state_manager is not None
         wallet_id = uint32(request["wallet_id"])
         address = request["target_address"]
@@ -1554,6 +1581,44 @@ class WalletRpcApi:
                     spend_bundle = tx.spend_bundle
                 await self.service.wallet_state_manager.add_pending_transaction(tx)
             return {"wallet_id": wallet_id, "success": True, "spend_bundle": spend_bundle}
+        except Exception as e:
+            log.exception(f"Failed to transfer NFT: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def nft_bulk_transfer(self, request) -> Dict:
+        assert self.service.wallet_state_manager is not None
+        wallet_id = uint32(request["wallet_id"])
+
+        nft_wallet: NFTWallet = self.service.wallet_state_manager.wallets[wallet_id]
+        try:
+            transfer_nfts = []
+            for nft in request["transfer_list"]:
+                # For saving the payload size, don't use dict here
+                address = nft[1]
+                nft_coin_id = nft[0]
+                if isinstance(address, str):
+                    puzzle_hash = decode_puzzle_hash(address)
+                else:
+                    log.warning("NFT coin %s doesn't have a target address, skipping ...", nft_coin_id)
+                    continue
+                if nft_coin_id.startswith(NFT_HRP):
+                    nft_coin_id = decode_puzzle_hash(nft_coin_id)
+                else:
+                    nft_coin_id = bytes32.from_hexstr(nft_coin_id)
+                try:
+                    nft_coin_info = nft_wallet.get_nft_coin_by_id(nft_coin_id)
+                    transfer_nfts.append((nft_coin_info, puzzle_hash))
+                except ValueError:
+                    log.error("Cannot find NFT coin %s, skipping ...", nft_coin_id)
+                    continue
+            fee = uint64(request.get("fee", 0))
+            if len(transfer_nfts) == 0:
+                return {"success": False, "error": "No valid NFT can be transferred."}
+            tx = await nft_wallet.bulk_transfer(
+                transfer_nfts,
+                fee=fee,
+            )
+            return {"wallet_id": wallet_id, "success": True, "spend_bundle": tx.spend_bundle}
         except Exception as e:
             log.exception(f"Failed to transfer NFT: {e}")
             return {"success": False, "error": str(e)}

@@ -1266,17 +1266,15 @@ class NFTWallet:
         return set_tx
 
     async def bulk_transfer(
-        self, nfts_to_send: List[NFTCoinInfo], targets: List[bytes32], fee: uint64 = uint64(0)
+        self, nfts_to_send: List[Tuple[NFTCoinInfo, bytes32]], fee: uint64 = uint64(0)
     ) -> TransactionRecord:
-        if len(nfts_to_send) > len(targets):
-            raise ValueError("Number of NFTs is less than number of targets")
         first = True
         fee_to_pay = fee
         spends = []
-        for i, nft_coin_info in enumerate(nfts_to_send):
+        for nft_coin_info, target_addr in nfts_to_send:
             txs = await self.generate_signed_transaction(
                 [nft_coin_info.coin.amount],
-                [targets[i]],
+                [target_addr],
                 coins={nft_coin_info.coin},
                 fee=fee_to_pay,
             )
