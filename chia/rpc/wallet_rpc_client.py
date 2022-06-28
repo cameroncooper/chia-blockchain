@@ -5,7 +5,7 @@ from chia.rpc.rpc_client import RpcClient
 from chia.types.announcement import Announcement
 from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.sized_bytes import bytes32
-from chia.util.ints import uint32, uint64
+from chia.util.ints import uint16, uint32, uint64
 from chia.wallet.trade_record import TradeRecord
 from chia.wallet.trading.offer import Offer
 from chia.wallet.transaction_record import TransactionRecord
@@ -667,7 +667,6 @@ class WalletRpcClient(RpcClient):
             "did_id": did_id,
             "fee": fee,
         }
-        breakpoint()
         response = await self.fetch("nft_bulk_mint_nft", request)
         return response
 

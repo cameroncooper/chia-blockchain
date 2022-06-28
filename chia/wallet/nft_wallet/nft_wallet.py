@@ -1191,7 +1191,10 @@ class NFTWallet:
             if first:
                 first = False
                 fee_to_pay = uint64(0)
-                change_ph = [x for x in txs[1].additions if x.amount != fee][0].puzzle_hash
+                # if len(txs) > 1:
+                #     change_ph = [x for x in txs[1].additions if x.amount != fee][0].puzzle_hash
+                # else:
+                change_ph = await self.wallet_state_manager.main_wallet.get_puzzle_hash(False)
             for tx in txs:
                 if tx.spend_bundle is not None:
                     spends.append(tx.spend_bundle)

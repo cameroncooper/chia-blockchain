@@ -1418,7 +1418,7 @@ class WalletRpcApi:
             royalty_puzhash = await nft_wallet.standard_wallet.get_new_puzzlehash()
         else:
             royalty_puzhash = royalty_address
-        royalty_percentage = request.get("royalty_percentage")
+        royalty_percentage = uint16(int(request.get("royalty_percentage")))
         metadata_list = []
         for meta in request["metadata_list"]:
             if "uris" not in meta.keys():
@@ -1506,7 +1506,7 @@ class WalletRpcApi:
                 return {"success": False, "error": "No valid NFT can be set DID."}
             fee = uint64(request.get("fee", 0))
             tx = await nft_wallet.bulk_set_nft_did(nft_list, did_id, fee=fee)
-            return {"wallet_id": wallet_id, "success": True, "spend_bundle": tx.spend_bundle}
+            return {"wallet_id": wallet_id, "success": True, "spend_bundle": tx.spend_bundle, "tx_id": tx.name}
         except Exception as e:
             log.exception(f"Failed to set DID for NFTs: {e}")
             return {"success": False, "error": f"Failed to set DID for NFTs: {e}"}
@@ -1644,7 +1644,7 @@ class WalletRpcApi:
                 transfer_nfts,
                 fee=fee,
             )
-            return {"wallet_id": wallet_id, "success": True, "spend_bundle": tx.spend_bundle}
+            return {"wallet_id": wallet_id, "success": True, "spend_bundle": tx.spend_bundle, "tx_id": tx.name}
         except Exception as e:
             log.exception(f"Failed to transfer NFT: {e}")
             return {"success": False, "error": str(e)}

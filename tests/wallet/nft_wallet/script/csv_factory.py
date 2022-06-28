@@ -25,6 +25,8 @@ async def create_nft_sample() -> List[Any]:
     ]
     return sample
 
+async def create_target_sample() -> List[Any]:
+    return [encode_puzzle_hash(bytes32(token_bytes(32)), "txch")]
 
 async def main() -> None:
     count = 100
@@ -38,6 +40,12 @@ async def main() -> None:
     royalty_basis_pts = 300
     print("Royalty DID: %s" % royalty_did_address)
     print("Royalty Percent: %s" % royalty_basis_pts)
+
+    target_coro = [create_target_sample() for _ in range(count)]
+    target_data = await asyncio.gather(*target_coro)
+    with open("target_sample.csv", "w") as f:
+        writer = csv.writer(f)
+        writer.writerows(target_data)
 
 
 if __name__ == "__main__":
