@@ -24,7 +24,6 @@ from chia.util.ints import uint16, uint64
 from chia.wallet.puzzles.load_clvm import load_clvm
 from chia.wallet.util.wallet_types import WalletType
 
-logging.basicConfig(format="%(message)s", level=logging.DEBUG, stream=sys.stdout)
 
 config = load_config(Path(DEFAULT_ROOT_PATH), "config.yaml")
 testnet_agg_sig_data = config["network_overrides"]["constants"]["testnet10"]["AGG_SIG_ME_ADDITIONAL_DATA"]
@@ -101,7 +100,7 @@ class NFTManager:
             fee=fee,
         )
         if not resp["success"]:
-            logging.error("Minting failed for rows %s to %s" % (start_row, end_row))
+            logging.error("Minting failed for rows %s to %s: %s" % (start_row, end_row, resp))
             raise ValueError("Minting failed for rows %s to %s" % (start_row, end_row))
 
         return resp
@@ -115,7 +114,7 @@ class NFTManager:
             fee
         )
         if not resp["success"]:
-            logging.error("Set DID failed for rows %s to %s" % (start_row, end_row))
+            logging.error("Set DID failed for rows %s to %s: %s" % (start_row, end_row, resp))
             raise ValueError("Set DID failed for rows %s to %s" % (start_row, end_row))
         return resp
 
@@ -126,7 +125,7 @@ class NFTManager:
             fee
         )
         if not resp["success"]:
-            logging.error("Transfer failed for rows %s to %s" % (start_row, end_row))
+            logging.error("Transfer failed for rows %s to %s: %s" % (start_row, end_row, resp))
             raise ValueError("Transfer failed for rows %s to %s" % (start_row, end_row))
         return resp
 
@@ -186,13 +185,16 @@ async def transfer(target_filename, start_row, chunk, fee) -> None:
     nfts = await manager.wallet_client.list_nfts(manager.nft_wallet_id)
     nft_ids = [info["nft_coin_id"] for info in nfts["nft_list"]]
     nft_transfer_list = list(zip(nft_ids, data))
-
+    
     transfer_resp = await manager.transfer_nfts(nft_transfer_list, fee)
     transfer_sb = SpendBundle.from_json_dict(transfer_resp["spend_bundle"])
     transfer_tx = bytes32(hexstr_to_bytes(transfer_resp["tx_id"][2:]))
     await manager.wait_for_tx(transfer_tx)
-
     await manager.close()
+
+    with open("completed_mints.csv", "a") as f:
+        writer = csv.writer(f)
+        writer.writerows(nft_transfer_list)
 
 async def test():
     manager = NFTManager()
@@ -200,22 +202,39 @@ async def test():
 
     nft_data = await manager.wallet_client.list_nfts(3)
     nfts = nft_data["nft_list"]
+
+    wallet_balance_res = await manager.wallet_client.get_wallet_balance(1)
+    wallet_balance = wallet_balance_res["confirmed_wallet_balance"]
+    
+    xch_coins = await manager.wallet_client.select_coins(amount=wallet_balance, wallet_id=1)
+    num_coins = 20
+    fee = 100
+
+    spendable_bal = sum([c.amount for c in xch_coins])
+    dividable_bal = uint64(spendable_bal/num_coins)
+
+    
     breakpoint()
+    xch_coins = xch_coins_res["coins"]
 
     await manager.close()
 
 async def main():
     csv_filename = "sample.csv"
     target_filename = "target_sample.csv"
-    chunk = 20
+    chunk = 10
     royalty_address = "did:chia:1t0nmt3cjeclutcyunmpwq9l4wak99g4wegs2f3kxu6vzwrhdeg7qkw9ne7"
     royalty_percentage = 300
     fee = 10
 
+    with open(csv_filename, "r") as f:
+        csv_reader = csv.reader(f)
+        bulk_data = list(csv_reader)
+
     start_row = 0
     max_loops = 5
     for i in range(max_loops):
-        print("Minting round: {}".format(i+i))
+        print("Minting round: {}".format(i+1))
         new_nft_ids = await mint(
             csv_filename,
             start_row,
@@ -228,10 +247,26 @@ async def main():
         await update(new_nft_ids, fee)
         start_row += chunk
 
+        completed_data = bulk_data[start_row:start_row+chunk]
+        with open("completed_mints.csv", "a") as f:
+            writer = csv.writer(f)
+            writer.writerows(completed_data)
+
+        
+
+    
     start_row = 0
     for i in range(max_loops):
         print("Transfer round: {}".format(i+1))
         await transfer(target_filename, start_row, chunk, fee)
-    
+        
+
 if __name__ == "__main__":
+    logging.basicConfig(
+        filename="bulk_mint.log",
+        filemode='a',
+        format='%(asctime)s %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S',
+        level=logging.DEBUG
+    )
     asyncio.run(main())
