@@ -1,7 +1,7 @@
+import argparse
 import asyncio
 import csv
 import logging
-import argparse
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -25,7 +25,6 @@ from chia.util.ints import uint16, uint64
 from chia.wallet.puzzles.load_clvm import load_clvm
 from chia.wallet.util.wallet_types import WalletType
 
-
 # --------------------------------
 # CONSTANTS
 # --------------------------------
@@ -39,6 +38,7 @@ target_filename = "target_sample.csv"
 chunk = 25
 royalty_address = "did:chia:1t0nmt3cjeclutcyunmpwq9l4wak99g4wegs2f3kxu6vzwrhdeg7qkw9ne7"
 royalty_percentage = 300
+fingerprint = 1456560907
 
 
 class NFTManager:
@@ -63,6 +63,8 @@ class NFTManager:
             self.wallet_client = await WalletRpcClient.create(
                 rpc_host, uint16(wallet_rpc_port), Path(DEFAULT_ROOT_PATH), config
             )
+        print("Setting fingerprint to {}".format(fingerprint))
+        await self.wallet_client.log_in(fingerprint)
         main_wallets = await self.wallet_client.get_wallets(wallet_type=WalletType.STANDARD_WALLET)
         did_wallets = await self.wallet_client.get_wallets(wallet_type=WalletType.DECENTRALIZED_ID)
         nft_wallets = await self.wallet_client.get_wallets(wallet_type=WalletType.NFT)
@@ -84,8 +86,12 @@ class NFTManager:
     async def get_new_nfts(self, sb):
         did_info = await self.wallet_client.get_did_id(self.did_wallet_id)
         did_coin_id = bytes32(hexstr_to_bytes(did_info["coin_id"]))
-        new_nfts = ["0x" + coin.name().hex() for coin in sb.additions() if coin.parent_coin_info != did_coin_id and coin.amount == 1]
-        return  new_nfts
+        new_nfts = [
+            "0x" + coin.name().hex()
+            for coin in sb.additions()
+            if coin.parent_coin_info != did_coin_id and coin.amount == 1
+        ]
+        return new_nfts
 
     async def mint_nfts(self, data, royalty_address, royalty_percentage, fee):
         did_id = await self.current_did_id()
@@ -118,28 +124,18 @@ class NFTManager:
 
     async def set_did(self, nft_id_list, fee):
         did_id = await self.current_did_id()
-        resp = await self.wallet_client.bulk_set_nft_did(
-            self.nft_wallet_id,
-            did_id,
-            nft_id_list,
-            fee
-        )
+        resp = await self.wallet_client.bulk_set_nft_did(self.nft_wallet_id, did_id, nft_id_list, fee)
         if not resp["success"]:
             logging.error("Set DID failed for rows %s to %s: %s" % (start_row, end_row, resp))
             raise ValueError("Set DID failed for rows %s to %s" % (start_row, end_row))
         return resp
 
     async def transfer_nfts(self, nft_transfer_list, fee):
-        resp = await self.wallet_client.bulk_nft_transfer(
-            self.nft_wallet_id,
-            nft_transfer_list,
-            fee
-        )
+        resp = await self.wallet_client.bulk_nft_transfer(self.nft_wallet_id, nft_transfer_list, fee)
         if not resp["success"]:
             logging.error("Transfer failed for rows %s to %s: %s" % (start_row, end_row, resp))
             raise ValueError("Transfer failed for rows %s to %s" % (start_row, end_row))
         return resp
-
 
     async def wait_for_tx(self, tx_id):
         print("waiting for transaction: %s" % tx_id)
@@ -149,11 +145,12 @@ class NFTManager:
                 break
             else:
                 await asyncio.sleep(20)
-                
+
 
 # --------------------------------
 # MANAGER FUNCTIONS FOR MINTING
 # --------------------------------
+
 
 async def mint(start_row, royalty_address, royalty_percentage, fee) -> None:
     with open(csv_filename, "r") as f:
@@ -161,17 +158,25 @@ async def mint(start_row, royalty_address, royalty_percentage, fee) -> None:
         bulk_data = list(csv_reader)
     manager = NFTManager()
     await manager.connect()
-    data = bulk_data[start_row:start_row+chunk]
+    data = bulk_data[start_row : start_row + chunk]
+
+    if start_row != 0:
+        minted_data = get_minted()
+        for row in data:
+            if row in minted_data:
+                raise ValueError("Already minted data for NFT {}\n Check start_row value is correct".format(row))
+
     mint_resp = await manager.mint_nfts(data, royalty_address, royalty_percentage, fee)
     mint_sb = SpendBundle.from_json_dict(mint_resp["spend_bundle"])
     new_nft_ids = await manager.get_new_nfts(mint_sb)
     set_nfts_to_update(new_nft_ids)
     mint_tx = bytes32(hexstr_to_bytes(mint_resp["tx_id"][2:]))
-    
+    set_minted(data)
     await manager.wait_for_tx(mint_tx)
     await manager.close()
-    
+
     return new_nft_ids
+
 
 async def update(new_nft_ids, fee):
     manager = NFTManager()
@@ -191,49 +196,48 @@ async def update(new_nft_ids, fee):
 
     await manager.close()
 
+
 async def transfer(start_row, fee) -> None:
     with open(target_filename, "r") as f:
         target_data = f.read().splitlines()
     manager = NFTManager()
     await manager.connect()
-    
-    data = target_data[start_row:start_row+chunk]
+
+    data = target_data[start_row : start_row + chunk]
     nfts = await manager.wallet_client.list_nfts(manager.nft_wallet_id)
     nft_ids = [info["nft_coin_id"] for info in nfts["nft_list"]]
     assert len(nft_ids) > 0
     nft_transfer_list = list(zip(nft_ids, data))
-    
+
     transfer_resp = await manager.transfer_nfts(nft_transfer_list, fee)
     transfer_sb = SpendBundle.from_json_dict(transfer_resp["spend_bundle"])
     transfer_tx = bytes32(hexstr_to_bytes(transfer_resp["tx_id"][2:]))
     await manager.wait_for_tx(transfer_tx)
     await manager.close()
 
-    with open("completed_mints.csv", "a") as f:
-        writer = csv.writer(f)
-        writer.writerows(nft_transfer_list)
-
 
 # --------------------------------
 # HELPER FUNCTIONS FOR DEVELOPMENT
 # --------------------------------
-        
+
+
 async def view():
     manager = NFTManager()
     await manager.connect()
 
-    nft_data = await manager.wallet_client.list_nfts(3)
+    nft_data = await manager.wallet_client.list_nfts(manager.nft_wallet_id)
     nfts = nft_data["nft_list"]
 
-    wallet_balance_res = await manager.wallet_client.get_wallet_balance(1)
+    wallet_balance_res = await manager.wallet_client.get_wallet_balance(manager.main_wallet_id)
     wallet_balance = wallet_balance_res["confirmed_wallet_balance"]
-    
-    xch_coins = await manager.wallet_client.select_coins(amount=wallet_balance, wallet_id=1)
+
+    xch_coins = await manager.wallet_client.select_coins(amount=wallet_balance, wallet_id=manager.main_wallet_id)
     nft_list = await manager.wallet_client.list_nfts(manager.nft_wallet_id)
     nft_coins = nft_data["nft_list"]
     breakpoint()
-    
+
     await manager.close()
+
 
 async def clear_nfts():
     manager = NFTManager()
@@ -246,21 +250,22 @@ async def clear_nfts():
     for i in range(loops):
         await transfer(start_row, fee)
         start_row += chunk
-    
+
+
 async def split(num_coins, fee):
     manager = NFTManager()
     await manager.connect()
 
     wallet_balance_res = await manager.wallet_client.get_wallet_balance(manager.main_wallet_id)
     wallet_balance = wallet_balance_res["confirmed_wallet_balance"]
-    
+
     xch_coins = await manager.wallet_client.select_coins(amount=wallet_balance, wallet_id=manager.main_wallet_id)
-    
+
     final_coin_amt = uint64((wallet_balance - fee) / num_coins)
     remainder = (wallet_balance - fee) % final_coin_amt
     additions = []
     for i in range(num_coins):
-        amt = final_coin_amt if i !=0 else final_coin_amt + remainder
+        amt = final_coin_amt if i != 0 else final_coin_amt + remainder
         next_ph = await manager.wallet_client.get_next_address(manager.main_wallet_id, True)
         additions.append({"puzzle_hash": decode_puzzle_hash(next_ph), "amount": amt})
 
@@ -281,36 +286,32 @@ async def split(num_coins, fee):
 # ENTRY AND RECOVERY FUNCTIONS
 # --------------------------------
 
+
 async def process_chunk(fee):
     start_row = get_state()
 
-    print("Minting Rows {} - {}".format(start_row, start_row+chunk))    
-    new_nft_ids = await mint(
-        start_row,
-        royalty_address,
-        royalty_percentage,
-        fee
-    )
+    print("Minting Rows {} - {}".format(start_row, start_row + chunk))
+    new_nft_ids = await mint(start_row, royalty_address, royalty_percentage, fee)
 
     set_nfts_to_update(new_nft_ids)
 
-    await asyncio.sleep(5) # sleep for 5 seconds so wallet can catch up
+    await asyncio.sleep(5)  # sleep for 5 seconds so wallet can catch up
 
-    print("Setting DID for Rows {} - {}".format(start_row, start_row+chunk))
+    print("Setting DID for Rows {} - {}".format(start_row, start_row + chunk))
     try:
         await update(new_nft_ids, fee)
     except:
         raise ValueError("Set DID failed for chunk starting at row {}".format(start_row))
 
-    print("Transfering Rows {} - {}".format(start_row, start_row+chunk))
+    print("Transfering Rows {} - {}".format(start_row, start_row + chunk))
     try:
         await transfer(start_row, fee)
     except:
         raise ValueError("Transfer Failed for chunk starting at row {}".format(start_row))
 
-    set_state(start_row+chunk)
-    print("\nMinted and transferred coins from csv rows: %s to %s"  % (start_row, start_row+chunk))
-    
+    set_state(start_row + chunk)
+    print("\nMinted and transferred coins from csv rows: %s to %s" % (start_row, start_row + chunk))
+
 
 async def retry_update(fee):
     new_nft_ids = get_nfts_to_update()
@@ -322,7 +323,8 @@ async def retry_update(fee):
         raise ValueError("Retry Set DID failed: \n{}".format(e))
 
     await retry_transfer(fee)
-    
+
+
 async def retry_transfer(fee):
     start_row = get_state()
     print("Retrying Transfer for rows: {} - {}".format(start_row, start_row + chunk))
@@ -332,12 +334,13 @@ async def retry_transfer(fee):
         raise ValueError("Retry transfer failed: \n{}".format(e))
     set_state(start_row + chunk)
 
+
 async def main(fee):
     if not Path("mint_state.csv").is_file():
         set_state(0)
 
     max_rows = 10000
-        
+
     while True:
         await process_chunk(fee)
         next_row = get_state()
@@ -352,14 +355,30 @@ async def main(fee):
 # STATE MANAGEMENT FUNCTIONS
 # --------------------------------
 
+
 def get_state():
     with open("mint_state.csv", "r") as f:
         start_row = int(f.read())
     return start_row
 
+
 def set_state(start_row):
     with open("mint_state.csv", "w") as f:
         f.write(str(start_row))
+
+
+def set_minted(metadata_list):
+    with open("completed_mints.csv", "a") as f:
+        writer = csv.writer(f)
+        writer.writerows(metadata_list)
+
+
+def get_minted():
+    with open("completed_mints.csv", "r") as f:
+        metadata_list = f.read().splitlines()
+    metadata_list = [r.split(",") for r in metadata_list]
+    return metadata_list
+
 
 def set_nfts_to_update(new_nft_ids):
     with open("nft_ids_to_update.csv", "w") as f:
@@ -367,18 +386,20 @@ def set_nfts_to_update(new_nft_ids):
         for nft in new_nft_ids:
             writer.writerow([nft])
 
+
 def get_nfts_to_update():
     with open("nft_ids_to_update.csv", "r") as f:
         new_nft_ids = f.read().splitlines()
     return new_nft_ids
 
+
 if __name__ == "__main__":
     logging.basicConfig(
         filename="bulk_mint.log",
-        filemode='a',
-        format='%(asctime)s %(levelname)s: %(message)s',
-        datefmt='%H:%M:%S',
-        level=logging.DEBUG
+        filemode="a",
+        format="%(asctime)s %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+        level=logging.DEBUG,
     )
     fee = 100
     if len(sys.argv) > 1:
@@ -393,7 +414,5 @@ if __name__ == "__main__":
             asyncio.run(retry_update(fee))
         elif sys.argv[1] == "retry_transfer":
             asyncio.run(retry_transfer(fee))
-        elif sys.argv[1] == "test":
-            writelist()
     else:
         asyncio.run(main(fee))
