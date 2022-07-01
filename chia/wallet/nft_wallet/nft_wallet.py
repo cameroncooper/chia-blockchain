@@ -965,6 +965,8 @@ class NFTWallet:
         fee: uint64 = uint64(0),
     ) -> Optional[TransactionRecord]:
         self.log.debug("Generating bulk NFTs")
+        if len(metadata_list) == 0:
+            raise ValueError("Missing a list of metadata for minting")
         if self.did_id is not None and did_id is None:
             # For a DID enabled NFT wallet it cannot mint NFT0. Mint NFT1 instead.
             did_id = self.did_id
@@ -978,16 +980,18 @@ class NFTWallet:
             raise ValueError(f"Missing DID Wallet for did_id: {did_id}")
         amount = uint64(1)
         main_wallet_id = self.standard_wallet.wallet_id
-        spendable_coins = list(await self.wallet_state_manager.get_spendable_coins_for_wallet(main_wallet_id))
+        all_spendable_coins = list(await self.wallet_state_manager.get_spendable_coins_for_wallet(main_wallet_id))
+        spendable_coins = [cr for cr in all_spendable_coins if cr.coin.amount>1000000]
         if len(spendable_coins) < len(metadata_list):
             raise ValueError("Not enough coins to generate a bulk mint spend bundle")
         first = True
         fee_to_pay = fee
         launch_txs = []
         nfts = []
+        genesis_launcher_puz = nft_puzzles.LAUNCHER_PUZZLE
         for i, metadata in enumerate(metadata_list):
             origin = spendable_coins[i]
-            genesis_launcher_puz = nft_puzzles.LAUNCHER_PUZZLE
+            # genesis_launcher_puz = nft_puzzles.LAUNCHER_PUZZLE
             launcher_coin = Coin(origin.name(), genesis_launcher_puz.get_tree_hash(), uint64(amount))
             p2_inner_puzzle = await self.standard_wallet.get_new_puzzle()
             target_puzzle_hash = p2_inner_puzzle.get_tree_hash()
@@ -1179,7 +1183,8 @@ class NFTWallet:
         self, nfts_to_send: List[Tuple[NFTCoinInfo, bytes32]], fee: uint64 = uint64(0)
     ) -> TransactionRecord:
         first = True
-        fee_to_pay = fee
+        assert fee >= 0
+        fee_to_pay = uint16(fee)
         spends = []
         for nft_coin_info, target_addr in nfts_to_send:
             txs = await self.generate_signed_transaction(

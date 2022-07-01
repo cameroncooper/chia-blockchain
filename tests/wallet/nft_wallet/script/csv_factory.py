@@ -29,7 +29,7 @@ async def create_target_sample() -> List[Any]:
     return [encode_puzzle_hash(bytes32(token_bytes(32)), "txch")]
 
 async def main() -> None:
-    count = 100
+    count = 1000
     coros = [create_nft_sample() for _ in range(count)]
     data = await asyncio.gather(*coros)
     with open("sample.csv", "w") as f:
