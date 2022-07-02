@@ -105,9 +105,9 @@ class NFTManager:
                 "hash": row[0],
                 "uris": [row[1]],
                 "meta_hash": row[2],
-                "meta_urls": [row[3]],
+                "meta_uris": [row[3]],
                 "license_hash": row[4],
-                "license_urls": [row[5]],
+                "license_uris": [row[5]],
                 "series_number": row[6],
                 "series_total": row[7],
             }
