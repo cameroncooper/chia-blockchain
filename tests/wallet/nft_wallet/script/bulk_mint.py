@@ -455,7 +455,8 @@ async def test():
     manager = NFTManager()
     await manager.connect()
     await manager.check_wallet_sync()
-    # await manager.check_mempool()
+    await manager.check_mempool()
+    print("\nWallet Client and Node Client are connected :)\n")
     await manager.close()
 
 
