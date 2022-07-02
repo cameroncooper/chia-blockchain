@@ -38,7 +38,8 @@ target_filename = "target_sample.csv"
 chunk = 25
 royalty_address = "did:chia:1t0nmt3cjeclutcyunmpwq9l4wak99g4wegs2f3kxu6vzwrhdeg7qkw9ne7"
 royalty_percentage = 300
-fingerprint = 1455603606 #1456560907
+fingerprint = 1455603606
+min_fee = 1
 
 
 class NFTManager:
@@ -172,9 +173,9 @@ class NFTManager:
         if len(txs) > 0:
             mempool_cost = sum([tx["cost"] for tx in txs.values()])
             fees = sorted([tx["fee"] for tx in txs.values()])
-            min_fee = fees[0]
+            pool_min_fee = fees[0]
         else:
-            min_fee = 0
+            pool_min_fee = 0
             mempool_cost = 0
         if mempool_cost  >  5000000000:
             if spend_type == "mint":
@@ -184,7 +185,7 @@ class NFTManager:
             elif spend_type == "transfer":
                 fee = 335000000 * chunk
         else:
-            fee = min_fee + 1
+            fee = pool_min_fee + min_fee
         return fee
             
 # --------------------------------
