@@ -36,9 +36,9 @@ DEFAULT_CONSTANTS = DEFAULT_CONSTANTS.replace_str_to_bytes(**{"AGG_SIG_ME_ADDITI
 csv_filename = "sample.csv"
 target_filename = "target_sample.csv"
 chunk = 25
-royalty_address = "did:chia:1t0nmt3cjeclutcyunmpwq9l4wak99g4wegs2f3kxu6vzwrhdeg7qkw9ne7"
+royalty_address = "" # regular address
 royalty_percentage = 300
-fingerprint = 1455603606
+fingerprint = 12345678
 min_fee = 1
 
 
@@ -351,7 +351,7 @@ async def process_chunk():
     except:
         raise ValueError("Set DID failed for chunk starting at row {}".format(start_row))
 
-    await asyncio.sleep(5)  # sleep for 5 seconds so wallet can catch up
+    await asyncio.sleep(5)  # sleep for 5 seconds so wallet can catch up,  maybe increase if needed
     
     try:
         await transfer(start_row)
