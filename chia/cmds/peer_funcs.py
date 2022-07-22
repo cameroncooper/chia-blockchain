@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Coroutine, Awaitable
+from typing import Any, Dict, Optional, Tuple, Iterator, AsyncIterator
 
 from chia.rpc.rpc_client import RpcClient
 from chia.util.default_root import DEFAULT_ROOT_PATH
@@ -101,63 +101,65 @@ async def print_connections(rpc_client: RpcClient, trusted_peers: Dict[str, Any]
         print(con_str)
 
 
-async def execute_with_any_node(
-    node_type: str,
-    rpc_port: Optional[int],
-    function: Callable,
-    root_path: Path = DEFAULT_ROOT_PATH,
-    *args,
-) -> Any:
-    import traceback
-
+async def check_client_connection(rpc_client: RpcClient, node_type: str, rpc_port: int) -> bool:
     from aiohttp import ClientConnectorError
 
+    try:
+        await rpc_client.healthz()
+    except ClientConnectorError:
+        print(f"Connection error. Check if {node_type.replace('_', ' ')} rpc is running at {rpc_port}")
+        print(f"This is normal if {node_type.replace('_', ' ')} is still starting up")
+        return False
+    return True
+
+async def execute_with_any_node_cli(
+    node_type_str: str,
+    rpc_port: Optional[int],
+    root_path: Path = DEFAULT_ROOT_PATH,
+) -> AsyncIterator[Tuple[RpcClient, Dict[str, object]]]:
     from chia.util.config import load_config
+
+    config = load_config(root_path, "config.yaml")
+    if node_type_str not in NODE_TYPES:
+        print(f"Invalid node type: {node_type_str}")
+        return
+
+    if node_type_str == "farmer":
+        from chia.rpc.farmer_rpc_client import FarmerRpcClient
+
+        node_type = FarmerRpcClient
+    elif node_type_str == "wallet":
+        from chia.rpc.wallet_rpc_client import WalletRpcClient
+
+        node_type = WalletRpcClient
+    elif node_type_str == "full_node":
+        from chia.rpc.full_node_rpc_client import FullNodeRpcClient
+
+        node_type = FullNodeRpcClient
+    elif node_type_str == "harvester":
+        from chia.rpc.harvester_rpc_client import HarvesterRpcClient
+
+        node_type = HarvesterRpcClient
+    else:
+        raise NotImplementedError(f"Missing node type: {node_type_str}")
+
+    async for rpc_client in execute_with_any_node(node_type, config, rpc_port, root_path):
+        if await check_client_connection(rpc_client, node_type_str, rpc_port):
+            yield rpc_client, config
+
+
+async def execute_with_any_node(
+    node_type: RpcClient, config: Dict[str, str], rpc_port: int, root_path: Path = DEFAULT_ROOT_PATH
+) -> AsyncIterator[RpcClient]:
     from chia.util.ints import uint16
 
-    if node_type not in NODE_TYPES:
-        print(f"Invalid node type: {node_type}")
-        return
-    config = load_config(root_path, "config.yaml")
     self_hostname = config["self_hostname"]
-    if rpc_port is None:
-        rpc_port = config[node_type]["rpc_port"]
-    result = None
-    node_client: Optional[RpcClient] = None
     try:
-        client_args = self_hostname, uint16(rpc_port), root_path, config
-        if node_type == "farmer":
-            from chia.rpc.farmer_rpc_client import FarmerRpcClient
-
-            node_client = await FarmerRpcClient.create(*client_args)
-        elif node_type == "wallet":
-            from chia.rpc.wallet_rpc_client import WalletRpcClient
-
-            node_client = await WalletRpcClient.create(*client_args)
-        elif node_type == "full_node":
-            from chia.rpc.full_node_rpc_client import FullNodeRpcClient
-
-            node_client = await FullNodeRpcClient.create(*client_args)
-        elif node_type == "harvester":
-            from chia.rpc.harvester_rpc_client import HarvesterRpcClient
-
-            node_client = await HarvesterRpcClient.create(*client_args)
-        else:
-            raise NotImplementedError(f"Missing node type: {node_type}")
-        assert node_client is not None
-        result = await function(node_client, config, *args)
-
-    except Exception as e:
-        if isinstance(e, ClientConnectorError):
-            print(f"Connection error. Check if full node rpc is running at {rpc_port}")
-            print(f"This is normal if {node_type.replace('_', ' ')} is still starting up")
-        else:
-            tb = traceback.format_exc()
-            print(f"Exception from 'show' {tb}")
-    if node_client is not None:
+        node_client: node_type = await node_type.create(self_hostname, uint16(rpc_port), root_path, config)
+        yield node_client
+    finally:
         node_client.close()
         await node_client.await_closed()
-    return result
 
 
 async def peer_async(
@@ -166,7 +168,6 @@ async def peer_async(
     show_connections: bool,
     add_connection: str,
     remove_connection: str,
-    # trusted_peers: Dict[str, Any],
 ) -> None:
     # Check or edit node connections
     if show_connections:
