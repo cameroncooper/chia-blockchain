@@ -22,6 +22,7 @@ from chia.wallet.outer_puzzles import (
 )
 from chia.wallet.payment import Payment
 from chia.wallet.puzzle_drivers import PuzzleInfo, Solver
+from chia.wallet.puzzles.cat_loader import CAT1_MOD_HASH
 from chia.wallet.puzzles.load_clvm import load_clvm
 from chia.wallet.util.puzzle_compression import (
     compress_object_with_puzzles,
@@ -149,12 +150,9 @@ class Offer:
             additions: List[Coin] = [a for a in parent_spend.additions() if a not in self.bundle.removals()]
 
             puzzle_driver = match_puzzle(parent_puzzle)
+            asset_id = create_asset_id(puzzle_driver)
             if puzzle_driver is not None:
-                if puzzle_driver.info["type"] == "CAT1":
-                    asset_id = bytes32.from_hexstr('0xdead')
-                    coins_for_this_spend.extend([a for a in additions if a.puzzle_hash == OFFER_HASH])
-                else:
-                    asset_id = create_asset_id(puzzle_driver)
+                if puzzle_driver.info["type"] != "CAT1":
                     inner_puzzle: Optional[Program] = get_inner_puzzle(puzzle_driver, parent_puzzle)
                     inner_solution: Optional[Program] = get_inner_solution(puzzle_driver, parent_solution)
                     assert inner_puzzle is not None and inner_solution is not None
@@ -175,6 +173,9 @@ class Offer:
                                 ]
                                 if len(additions_w_amount_and_puzhash) == 1:
                                     coins_for_this_spend.append(additions_w_amount_and_puzhash[0])
+                else:
+                    asset_id = CAT1_MOD_HASH  # easiest way to identify CAT1 coin.
+                    coins_for_this_spend.extend([a for a in additions if a.puzzle_hash == OFFER_HASH])
             else:
                 asset_id = None
                 coins_for_this_spend.extend([a for a in additions if a.puzzle_hash == OFFER_HASH])
@@ -217,10 +218,14 @@ class Offer:
         requested_amounts: Dict[Optional[bytes32], int] = self.get_requested_amounts()
 
         def keys_to_strings(dic: Dict[Optional[bytes32], Any]) -> Dict[str, Any]:
+            # Note: we can only identify cats that are being offered, not requested
+            # This is because we did not include a version number in PuzzleInfo
             new_dic: Dict[str, Any] = {}
             for key in dic:
                 if key is None:
                     new_dic["xch"] = dic[key]
+                elif key == CAT1_MOD_HASH:
+                    new_dic["CAT1"] = dic[key]
                 else:
                     new_dic[key.hex()] = dic[key]
             return new_dic

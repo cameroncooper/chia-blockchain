@@ -15,6 +15,7 @@ from chia.wallet.cat_wallet.cat_utils import (
 )
 from chia.wallet.lineage_proof import LineageProof
 from chia.wallet.puzzle_drivers import PuzzleInfo, Solver
+from chia.wallet.puzzles.cat_loader import CAT1_MOD_HASH
 
 
 @dataclass(frozen=True)
@@ -124,13 +125,9 @@ class CAT1OuterPuzzle:
     _get_inner_solution: Any
 
     def match(self, puzzle: Program) -> Optional[PuzzleInfo]:
-        cat1_tree_hash = bytes32.from_hexstr('72dec062874cd4d3aab892a0906688a1ae412b0109982e1797a170add88bdcdc')
+
         mod, curried_args = puzzle.uncurry()
-        if mod.get_tree_hash() == cat1_tree_hash:
-            matched = True
-        else:
-            matched, curried_args = False, iter(())
-        if matched:
+        if mod.get_tree_hash() == CAT1_MOD_HASH:
             _, tail_hash, inner_puzzle = curried_args
             constructor_dict = {
                 "type": "CAT1",
@@ -143,17 +140,17 @@ class CAT1OuterPuzzle:
         else:
             return None
 
-    def get_inner_puzzle(self, constructor: PuzzleInfo, puzzle_reveal: Program) -> Optional[Program]:
-        raise ValueError("CAT1 is EOL, you can not find the solution to this puzzle!")
+    def get_inner_puzzle(self, *args) -> Optional[Program]:
+        return None
 
-    def get_inner_solution(self, constructor: PuzzleInfo, solution: Program) -> Optional[Program]:
-        raise ValueError("CAT1 is EOL, you can not find the solution to this puzzle!")
+    def get_inner_solution(self, *args) -> Optional[Program]:
+        return None
 
     def asset_id(self, constructor: PuzzleInfo) -> Optional[bytes32]:
         return bytes32(constructor["tail"])
 
-    def construct(self, constructor: PuzzleInfo, inner_puzzle: Program) -> Program:
-        raise ValueError("CAT1 is EOL, this puzzle can not be constructed!")
+    def construct(self, *args) -> Program:
+        return Program.to(None)
 
     def solve(self, *args) -> Program:
-        raise ValueError("CAT1 is EOL, this puzzle can not be solved!")
+        return Program.to(None)

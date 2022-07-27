@@ -422,6 +422,10 @@ async def print_offer_summary(cat_name_resolver: CATNameResolver, sum_dict: Dict
                 unit = units["mojo"]
                 if has_fee:
                     description = " [Typically represents change returned from the included fee]"
+            elif asset_id == "CAT1":
+                name = "EOL CAT1 asset."
+                unit = units["mojo"]
+                description = " [Dont trade this asset, its EOL.]"
             else:
                 unit = units["cat"]
                 result = await cat_name_resolver(bytes32.from_hexstr(asset_id))
