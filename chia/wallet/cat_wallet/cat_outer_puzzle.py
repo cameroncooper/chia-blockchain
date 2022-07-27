@@ -112,3 +112,48 @@ class CATOuterPuzzle:
             )
         bundle = unsigned_spend_bundle_for_spendable_cats(CAT_MOD, spendable_cats)
         return next(cs.solution.to_program() for cs in bundle.coin_spends if cs.coin == target_coin)
+
+
+@dataclass(frozen=True)
+class CAT1OuterPuzzle:
+    _match: Any
+    _asset_id: Any
+    _construct: Any
+    _solve: Any
+    _get_inner_puzzle: Any
+    _get_inner_solution: Any
+
+    def match(self, puzzle: Program) -> Optional[PuzzleInfo]:
+        cat1_tree_hash = bytes32.from_hexstr('72dec062874cd4d3aab892a0906688a1ae412b0109982e1797a170add88bdcdc')
+        mod, curried_args = puzzle.uncurry()
+        if mod.get_tree_hash() == cat1_tree_hash:
+            matched = True
+        else:
+            matched, curried_args = False, iter(())
+        if matched:
+            _, tail_hash, inner_puzzle = curried_args
+            constructor_dict = {
+                "type": "CAT1",
+                "tail": "0x" + tail_hash.as_python().hex(),
+            }
+            next_constructor = self._match(inner_puzzle)
+            if next_constructor is not None:
+                constructor_dict["also"] = next_constructor.info
+            return PuzzleInfo(constructor_dict)
+        else:
+            return None
+
+    def get_inner_puzzle(self, constructor: PuzzleInfo, puzzle_reveal: Program) -> Optional[Program]:
+        raise ValueError("CAT1 is EOL, you can not find the solution to this puzzle!")
+
+    def get_inner_solution(self, constructor: PuzzleInfo, solution: Program) -> Optional[Program]:
+        raise ValueError("CAT1 is EOL, you can not find the solution to this puzzle!")
+
+    def asset_id(self, constructor: PuzzleInfo) -> Optional[bytes32]:
+        return bytes32(constructor["tail"])
+
+    def construct(self, constructor: PuzzleInfo, inner_puzzle: Program) -> Program:
+        raise ValueError("CAT1 is EOL, this puzzle can not be constructed!")
+
+    def solve(self, *args) -> Program:
+        raise ValueError("CAT1 is EOL, this puzzle can not be solved!")
